@@ -12,11 +12,81 @@ Three nodes, no dependencies:
 
 ```
 Resolution Preset
-┌──────────────────────────────────────────────────┐
-│ preset   16:9 · 2048 × 1152 · 2.36 MP · K2+H3+SDXL│
-└──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│ preset   16:9 · 2048 × 1152 · 2.36 MP · K2+H3+SDXL │
+└────────────────────────────────────────────────────┘
    ↳ width 2048   height 1152   megapixels 2.36   label "2048x1152"
 ```
+
+## Usage
+
+Pick a preset, wire `width` and `height` into whatever takes dimensions. That's the
+whole thing:
+
+```
+Resolution Preset ──┬── width ──▶ Empty Latent · width
+                    └── height ─▶ Empty Latent · height
+```
+
+Either empty-latent node works. `EmptySD3LatentImage` is the nominally correct one for
+Krea 2 (`[B, 16, H//8, W//8]`, matching its 16-channel Wan21 format), but the legacy
+4-channel `EmptyLatentImage` is fine too: `comfy/sample.py` runs
+`fix_empty_latent_channels`, which detects an all-zero latent and repeats it out to the
+model's channel count. Same for the MiniMax H3 nodes — feed `width`/`height` straight
+into `MiniMax H3 Image to Video`.
+
+`megapixels` and `label` are there when useful and cost nothing left unconnected.
+`label` gives `"2048x1152"`, handy wired into a `filename_prefix` so saved files carry
+their resolution.
+
+### Three concrete pipelines
+
+**Krea 2 stills, delivered to a 1920×1080 screen** — pick `16:9 · 2048 × 1152`, then
+downscale once at the very end:
+
+```
+Resolution Preset  16:9 · 2048 × 1152 · 2.36 MP · K2+H3+SDXL
+        │ width, height
+        ▼
+EmptySD3LatentImage → KSampler → VAEDecode
+        ▼
+Upscale Image      lanczos · 1920 × 1080 · crop disabled
+        ▼
+Save Image
+```
+
+**MiniMax H3 video** — same front end into the H3 nodes. `2048 × 1152` if you want the
+crop-free downscale to 1080p; `1536 × 864` if you want to stay nearer H3's 1.03 MP
+native canvas and accept a ×1.25 upscale. See
+[Delivering to a fixed screen size](#delivering-to-a-fixed-screen-size) for the
+trade-off, which is about 5 dB of preserved detail.
+
+**Krea 2 Edit character reference** — pick a portrait preset and feed it at native
+resolution, with **no** `Upscale Image` on that branch:
+
+```
+Resolution Preset  9:16 · 1152 × 2048 · 2.36 MP · K2+H3+SDXL
+        │ width, height
+        ▼
+   (generate) → VAEEncode → ReferenceLatent → Edit Model Reference Method
+```
+
+Reference and generation resolutions are independent — the DiT gives each reference its
+own slot in the positional ids, so a portrait reference conditioning a landscape
+generation is the intended design. Do not downscale a reference to your delivery size:
+`ReferenceLatent` never resizes, so whatever you hand it is what conditions the model,
+and 1080 is not a multiple of 16 anyway.
+
+### When to use the other two nodes
+
+**Resolution Selector (Real MP)** — a ratio or size the preset list doesn't carry: a
+custom ratio, an exact pixel budget, or 21:9 at 2352×1008 (on grid 16, while the 21:9
+presets use grid 64). It's an alternative to the preset node, not a stage after it;
+chaining them is meaningless, since it takes a ratio and a budget rather than
+dimensions.
+
+**Align Resolution to Grid** — dimensions you didn't choose. An img2img or ControlNet
+source, or an upscale chain where multiplying by 1.5 lands off-grid.
 
 ## Why
 
@@ -279,26 +349,11 @@ is just what `1920/2048` happens to equal; it isn't a number you need to carry a
 
 ### Wiring it up
 
-Stills (Krea 2):
+Graphs for the common cases are under [Usage](#usage). The delivery-side detail:
 
-```
-Resolution Selector (Real MP)     aspect 16:9 · megapixels 2.36 · alignment 32 · exact_ratio true
-        │ width, height                                                    → 2048 × 1152
-        ▼
-EmptySD3LatentImage → KSampler → VAEDecode
-        ▼
-Upscale Image        lanczos · width 1920 · height 1080 · crop disabled
-        ▼
-Save Image
-```
-
-`EmptySD3LatentImage` is the right latent node for Krea 2 — `[B, 16, H//8, W//8]`,
-matching its 16-channel Wan21 latent format.
-
-Video (MiniMax H3): same front end into the H3 nodes' `width`/`height`. `Upscale Image`
-handles a `[B,H,W,C]` batch frame by frame, but if you are dumping a PNG sequence and
-encoding with ffmpeg anyway, fold the resize into that pass instead — it avoids an
-intermediate 8-bit round trip and ffmpeg's lanczos is full precision:
+`Upscale Image` handles a `[B,H,W,C]` video batch frame by frame, but if you are dumping
+a PNG sequence and encoding with ffmpeg anyway, fold the resize into that pass instead —
+it avoids an intermediate 8-bit round trip and ffmpeg's lanczos is full precision:
 
 ```bash
 ffmpeg -framerate 24 -i raw_%05d.png \
