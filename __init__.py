@@ -2,14 +2,21 @@
 
 Resolution maths for latent-space models, done exactly.
 
-Two nodes:
+Three nodes:
+
+``ResolutionPreset``
+    The everyday one. A single list of known-good resolutions, each exactly on
+    its aspect ratio and on the model's patch grid, tagged with the model
+    families it is legal for. Generated from the lattice at import time, so it
+    cannot drift from what the solver below produces.
 
 ``ResolutionSelectorMP``
-    Aspect ratio + a *real* megapixel target (10^6 pixels, not 1024^2) ->
-    width/height that land on the model's patch grid **without drifting the
-    aspect ratio**. Rounding each axis independently -- what the built-in
-    Resolution Selector does -- turns 9:16 into 0.5649 instead of 0.5625. This
-    solves on the lattice of grid-aligned exact-ratio sizes instead.
+    The parametric one, for custom ratios and arbitrary budgets. Aspect ratio +
+    a *real* megapixel target (10^6 pixels, not 1024^2) -> width/height that
+    land on the model's patch grid **without drifting the aspect ratio**.
+    Rounding each axis independently -- what the built-in Resolution Selector
+    does -- turns 9:16 into 0.5649 instead of 0.5625. This solves on the
+    lattice of grid-aligned exact-ratio sizes instead.
 
 ``ResolutionAlignToGrid``
     Snap an arbitrary width/height (e.g. 1920x1080) to the same grid
@@ -48,7 +55,7 @@ from typing_extensions import override
 
 from comfy_api.latest import ComfyExtension, IO
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +147,90 @@ def align_value(value: int, alignment: int, mode: str) -> int:
     else:
         snapped = round(value / alignment) * alignment
     return max(alignment, snapped)
+
+
+# ---------------------------------------------------------------------------
+# Preset generation
+#
+# With exact_ratio on, the valid outputs are a discrete lattice, so a
+# continuous megapixel input advertises precision that does not exist. These
+# presets are the lattice, rendered readable -- derived at import time, never
+# hand-maintained, so they cannot drift from what the solver produces.
+# ---------------------------------------------------------------------------
+PRESET_MIN_MP = 0.25
+PRESET_MAX_MP = 4.3
+PRESET_MIN_ENTRIES = 6   # coarsest grid that still offers this many sizes wins
+PRESET_MAX_ENTRIES = 9   # thin geometrically beyond this, keeping both ends
+
+# 16:9 and 9:16 lead: the common case for video and for delivery to a screen.
+PRESET_RATIO_ORDER = [
+    AspectRatio.WIDESCREEN_H, AspectRatio.WIDESCREEN_V,
+    AspectRatio.SQUARE,
+    AspectRatio.PHOTO_H, AspectRatio.PHOTO_V,
+    AspectRatio.STANDARD_H, AspectRatio.STANDARD_V,
+    AspectRatio.SOCIAL_H, AspectRatio.SOCIAL_V,
+    AspectRatio.ULTRAWIDE_H, AspectRatio.ULTRAWIDE_V,
+]
+
+
+def compat_tag(width: int, height: int) -> str:
+    """Which model families a resolution is legal for, from its divisibility."""
+    if width % 64 == 0 and height % 64 == 0:
+        return "K2+H3+SDXL"
+    if width % 32 == 0 and height % 32 == 0:
+        return "K2+H3"
+    return "K2"
+
+
+def _lattice_points(w_ratio, h_ratio, alignment):
+    step = lattice_step(w_ratio, h_ratio, alignment)
+    out, n = [], 1
+    while True:
+        w, h = w_ratio * step * n, h_ratio * step * n
+        mp = w * h / 1_000_000
+        if mp > PRESET_MAX_MP:
+            return out
+        if mp >= PRESET_MIN_MP:
+            out.append((w, h, mp))
+        n += 1
+
+
+def build_presets() -> dict[str, tuple[int, int]]:
+    """Readable label -> (width, height), covering every aspect ratio.
+
+    Per ratio, take the *coarsest* grid that still yields PRESET_MIN_ENTRIES
+    sizes. Fine-lattice ratios (1:1 has L=16, so 16n x 16n) would otherwise
+    flood the list with a hundred near-identical entries; the coarse grid
+    lands them on canonical sizes instead (512, 768, 1024, ...). Coarse-lattice
+    ratios like 16:9 fall through to grid 16 and keep their full useful set.
+    """
+    presets = {}
+    for ratio in PRESET_RATIO_ORDER:
+        w_ratio, h_ratio = ASPECT_RATIOS[ratio]
+        divisor = math.gcd(w_ratio, h_ratio)
+        a, b = w_ratio // divisor, h_ratio // divisor
+
+        points = []
+        for alignment in (256, 128, 64, 32, 16):
+            points = _lattice_points(a, b, alignment)
+            if len(points) >= PRESET_MIN_ENTRIES:
+                break
+
+        if len(points) > PRESET_MAX_ENTRIES:
+            span = len(points) - 1
+            keep = {round(i * span / (PRESET_MAX_ENTRIES - 1)) for i in range(PRESET_MAX_ENTRIES)}
+            points = [points[i] for i in sorted(keep)]
+
+        # label with the declared ratio (21:9), not the reduced pair (7:3)
+        name = ratio.value.split(" ")[0]
+        for w, h, mp in points:
+            presets[f"{name} · {w} × {h} · {mp:.2f} MP · {compat_tag(w, h)}"] = (w, h)
+    return presets
+
+
+PRESETS = build_presets()
+PRESET_LABELS = list(PRESETS)
+DEFAULT_PRESET = next(k for k, v in PRESETS.items() if v == (2048, 1152))
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +329,47 @@ class ResolutionSelectorMP(IO.ComfyNode):
         return IO.NodeOutput(width, height, (width * height) / 1_000_000, f"{width}x{height}")
 
 
+class ResolutionPreset(IO.ComfyNode):
+    """Pick a known-good resolution from a list instead of computing one."""
+
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="ResolutionPreset",
+            display_name="Resolution Preset",
+            category="utilities",
+            description=(
+                "Known-good resolutions, picked from a list. Every entry is exactly "
+                "on its aspect ratio and on the model's patch grid. The tag says which "
+                "models it is legal for: K2 = Krea 2 / Flux / SD3 / Qwen-Image / Wan "
+                "(grid 16), K2+H3 adds MiniMax H3 (grid 32), K2+H3+SDXL adds the UNet "
+                "models (grid 64)."
+            ),
+            inputs=[
+                IO.Combo.Input(
+                    "preset",
+                    options=PRESET_LABELS,
+                    default=DEFAULT_PRESET,
+                    tooltip=(
+                        "ratio · width × height · real megapixels · compatible models. "
+                        "For a ratio or size not listed, use Resolution Selector (Real MP)."
+                    ),
+                ),
+            ],
+            outputs=[
+                IO.Int.Output(display_name="width"),
+                IO.Int.Output(display_name="height"),
+                IO.Float.Output(display_name="megapixels", tooltip="Real megapixels (10^6 pixels)."),
+                IO.String.Output(display_name="label", tooltip='Dimensions as "2048x1152".'),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, preset: str) -> IO.NodeOutput:
+        width, height = PRESETS[preset]
+        return IO.NodeOutput(width, height, (width * height) / 1_000_000, f"{width}x{height}")
+
+
 class ResolutionAlignToGrid(IO.ComfyNode):
     """Snap an arbitrary width/height onto the model's patch grid."""
 
@@ -282,7 +414,7 @@ class ResolutionAlignToGrid(IO.ComfyNode):
 class ResolutionToolsExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[IO.ComfyNode]]:
-        return [ResolutionSelectorMP, ResolutionAlignToGrid]
+        return [ResolutionPreset, ResolutionSelectorMP, ResolutionAlignToGrid]
 
 
 async def comfy_entrypoint() -> ResolutionToolsExtension:

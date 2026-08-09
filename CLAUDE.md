@@ -5,9 +5,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A single-file ComfyUI custom node package. All code lives in `__init__.py`; there
-is no build step, test suite, or linter config. Two nodes,
-`ResolutionSelectorMP` and `ResolutionAlignToGrid`, both pure integer maths with
-no torch/numpy involvement.
+is no build step, test suite, or linter config. Three nodes —
+`ResolutionPreset`, `ResolutionSelectorMP` and `ResolutionAlignToGrid` — all pure
+integer maths with no torch/numpy involvement.
+
+`ResolutionPreset`'s combo options are **generated at import time** by
+`build_presets()` from the same `lattice_step()` the solver uses, so the list can
+never disagree with `solve_exact()`. Do not hand-edit resolutions into it. The
+per-ratio grid choice (coarsest alignment yielding `PRESET_MIN_ENTRIES` sizes)
+exists because fine-lattice ratios like 1:1 have L=16 and would otherwise emit
+~105 entries; changing `PRESET_MIN_MP` / `PRESET_MAX_MP` / `PRESET_MIN_ENTRIES`
+silently reshapes every label, and **labels are the public API** — a saved
+workflow stores the selected label string, so altering the format or the tuning
+constants breaks existing graphs.
 
 Registered through ComfyUI's **V3 schema API**, not the legacy
 `NODE_CLASS_MAPPINGS` dict: `comfy_entrypoint()` returns a `ComfyExtension` whose

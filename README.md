@@ -2,12 +2,21 @@
 
 Resolution maths for latent-space models, done exactly.
 
-Two nodes, no dependencies:
+Three nodes, no dependencies:
 
 | Node | Does |
 |---|---|
+| **Resolution Preset** | pick a known-good resolution from a list — start here |
 | **Resolution Selector (Real MP)** | aspect ratio + real megapixels → grid-aligned width/height, ratio held exact |
 | **Align Resolution to Grid** | snap an arbitrary size onto the grid (1920×1080 → 1920×1088) |
+
+```
+Resolution Preset
+┌──────────────────────────────────────────────────┐
+│ preset   16:9 · 2048 × 1152 · 2.36 MP · K2+H3+SDXL│
+└──────────────────────────────────────────────────┘
+   ↳ width 2048   height 1152   megapixels 2.36   label "2048x1152"
+```
 
 ## Why
 
@@ -309,6 +318,37 @@ the useful rows are all still there (1024×576, 1536×864, 2048×1152, 2560×144
 2048×1152 comes out identical either way.
 
 ## Nodes
+
+### Resolution Preset
+
+One combo of 79 known-good resolutions. Every entry is exactly on its aspect ratio and
+on the patch grid, so there is nothing to compute and nothing to look up.
+
+**Inputs** — `preset`, formatted `ratio · width × height · real MP · compatible models`.
+The trailing tag comes from the resolution's divisibility, not a hand-kept table:
+
+| Tag | Grid | Models |
+|---|---|---|
+| `K2` | 16 | Krea 2, Flux, SD3, Qwen-Image, Wan |
+| `K2+H3` | 32 | the above, plus MiniMax H3 |
+| `K2+H3+SDXL` | 64 | the above, plus SDXL / SD1.5 — universally safe |
+
+**Outputs** — `width`, `height`, `megapixels`, `label`.
+
+The list is **generated from the lattice at import time**, never hand-maintained, so it
+cannot drift from what `Resolution Selector (Real MP)` produces. Per ratio it uses the
+coarsest grid that still offers at least six sizes: fine-lattice ratios like 1:1 (where
+L=16, so every 16 px is legal) would otherwise contribute a hundred near-identical
+entries, and the coarse grid lands them on canonical sizes — 512, 768, 1024, 1536, 2048
+— instead. Coarse-lattice ratios like 16:9 fall through to grid 16 and keep their full
+useful set.
+
+Why a list and not a number: with `exact_ratio` on, the valid outputs *are* a discrete
+lattice. A continuous megapixel input advertises precision that does not exist, and
+pushes the lookup table out of the node and into your head (or a sticky note next to
+the graph). Reach for `Resolution Selector (Real MP)` when you need a ratio or a size
+this list does not carry — 21:9 at exactly 2352×1008, say, which falls on grid 16 while
+the 21:9 presets use grid 64.
 
 ### Resolution Selector (Real MP)
 
