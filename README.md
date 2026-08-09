@@ -67,28 +67,133 @@ walks you straight into it.
 
 ## Reference resolutions
 
-Krea 2 (alignment 16, ~2.36 MP — Turbo's sanctioned 1K–2K band):
+All values below are **real** megapixels. If you're migrating from a table computed
+with the built-in selector, every label in it is ~4.86% low — a row marked "2.0 MP"
+there is really 2.09.
 
-| Ratio | Resolution | Real MP |
+### Exact-ratio tables (`exact_ratio = true`)
+
+These are the *complete* set of true-16:9 grid-aligned resolutions. There is nothing
+valid between the rows: the lattice is `256n × 144n` at alignment 16 and
+`512n × 288n` at alignment 32. Type the listed megapixels and you get that row back.
+
+Krea 2 — `alignment = 16`:
+
+| megapixels | Aspect | Output (alignment=16) |
 |---|---|---|
-| 1:1 | 1536 × 1536 | 2.36 |
-| 16:9 | 2048 × 1152 | 2.36 |
-| 9:16 | 1152 × 2048 | 2.36 |
-| 3:2 | 1824 × 1216 | 2.22 |
-| 4:3 | 1728 × 1296 | 2.24 |
-| 21:9 | 2352 × 1008 | 2.37 |
+| 0.15 | 16:9 | 512 x 288 |
+| 0.33 | 16:9 | 768 x 432 |
+| 0.59 | 16:9 | 1024 x 576 |
+| 0.92 | 16:9 | 1280 x 720 |
+| 1.33 | 16:9 | 1536 x 864 |
+| 1.81 | 16:9 | 1792 x 1008 |
+| 2.36 | 16:9 | 2048 x 1152 |
+| 2.99 | 16:9 | 2304 x 1296 |
+| 3.69 | 16:9 | 2560 x 1440 |
+| 4.46 | 16:9 | 2816 x 1584 |
 
-MiniMax H3 (alignment 32; native canvas is 768 short edge / 1.03 MP, so treat anything
-above ~1.3 MP as extrapolation):
+MiniMax H3 — `alignment = 32`:
 
-| Ratio | Resolution | Real MP |
+| megapixels | Aspect | Output (alignment=32) |
 |---|---|---|
-| 16:9 | 1024 × 576 | 0.59 |
-| 16:9 | 1536 × 864 | 1.33 |
-| ~1.75:1 | 1344 × 768 | 1.03 (node default, exactly the trained canvas) |
+| 0.15 | 16:9 | 512 x 288 |
+| 0.59 | 16:9 | 1024 x 576 |
+| 1.33 | 16:9 | 1536 x 864 |
+| 2.36 | 16:9 | 2048 x 1152 |
+| 3.69 | 16:9 | 2560 x 1440 |
+| 5.31 | 16:9 | 3072 x 1728 |
 
-Note that on a 32-grid, exact 16:9 only exists at `512n × 288n` — none of the commonly
-circulated H3 resolution tables are actually 16:9.
+Five rows to 4 MP is genuinely all there is on a 32-grid — which is why none of the
+commonly circulated H3 resolution tables are actually 16:9.
+
+### Area-target tables (`exact_ratio = false`)
+
+For when you want a specific pixel budget more than a perfect ratio. Each axis is
+rounded independently, so the ratio drifts a little.
+
+Krea 2 — `alignment = 16`:
+
+| megapixels | Aspect | Output (alignment=16) |
+|---|---|---|
+| 0.2 | 16:9 | 592 x 336 |
+| 0.3 | 16:9 | 736 x 416 |
+| 0.4 | 16:9 | 848 x 480 |
+| 0.5 | 16:9 | 944 x 528 |
+| 0.6 | 16:9 | 1040 x 576 |
+| 0.7 | 16:9 | 1120 x 624 |
+| 0.8 | 16:9 | 1200 x 672 |
+| 0.9 | 16:9 | 1264 x 704 |
+| 1.0 | 16:9 | 1328 x 752 |
+| 1.2 | 16:9 | 1456 x 816 |
+| 1.4 | 16:9 | 1584 x 880 |
+| 1.6 | 16:9 | 1680 x 944 |
+| 1.8 | 16:9 | 1792 x 1008 |
+| 2.0 | 16:9 | 1888 x 1056 |
+| 2.25 | 16:9 | 2000 x 1120 |
+| 2.5 | 16:9 | 2112 x 1184 |
+| 2.75 | 16:9 | 2208 x 1248 |
+| 3.0 | 16:9 | 2304 x 1296 |
+| 3.25 | 16:9 | 2400 x 1360 |
+| 3.5 | 16:9 | 2496 x 1408 |
+| 3.75 | 16:9 | 2576 x 1456 |
+| 4.0 | 16:9 | 2672 x 1504 |
+
+MiniMax H3 — `alignment = 32`:
+
+| megapixels | Aspect | Output (alignment=32) |
+|---|---|---|
+| 0.2 | 16:9 | 608 x 320 |
+| 0.3 | 16:9 | 736 x 416 |
+| 0.4 | 16:9 | 832 x 480 |
+| 0.5 | 16:9 | 928 x 544 |
+| 0.6 | 16:9 | 1024 x 576 |
+| 0.7 | 16:9 | 1120 x 640 |
+| 0.8 | 16:9 | 1184 x 672 |
+| 0.9 | 16:9 | 1280 x 704 |
+| 1.0 | 16:9 | 1344 x 736 |
+| 1.2 | 16:9 | 1472 x 832 |
+| 1.4 | 16:9 | 1568 x 896 |
+| 1.6 | 16:9 | 1696 x 960 |
+| 1.8 | 16:9 | 1792 x 992 |
+| 2.0 | 16:9 | 1888 x 1056 |
+| 2.25 | 16:9 | 1984 x 1120 |
+| 2.5 | 16:9 | 2112 x 1184 |
+| 2.75 | 16:9 | 2208 x 1248 |
+| 3.0 | 16:9 | 2304 x 1312 |
+| 3.25 | 16:9 | 2400 x 1344 |
+| 3.5 | 16:9 | 2496 x 1408 |
+| 3.75 | 16:9 | 2592 x 1440 |
+| 4.0 | 16:9 | 2656 x 1504 |
+
+Ratio drift is under 1% for most Krea 2 rows, but gets bad on H3 at the low end —
+6.9% at 0.2 MP, where a 32 px step is a large fraction of a 320 px axis. Below about
+0.6 MP on H3, use the exact lattice instead.
+
+### Other ratios at ~2.36 MP (Krea 2, `alignment = 16`)
+
+| megapixels | Aspect | Output (alignment=16) |
+|---|---|---|
+| 2.36 | 1:1 | 1536 x 1536 |
+| 2.36 | 16:9 | 2048 x 1152 |
+| 2.36 | 9:16 | 1152 x 2048 |
+| 2.22 | 3:2 | 1824 x 1216 |
+| 2.22 | 2:3 | 1216 x 1824 |
+| 2.24 | 4:3 | 1728 x 1296 |
+| 2.24 | 3:4 | 1296 x 1728 |
+| 2.37 | 21:9 | 2352 x 1008 |
+| 2.37 | 9:21 | 1008 x 2352 |
+
+### Picking a row
+
+**Krea 2** — the official envelope is a 1K–2K long edge, so 2.36 MP (2048×1152) is the
+top of sanctioned territory. The 2.99 and 3.69 rows are extrapolation: expect detail
+repetition rather than sharper eyes.
+
+**MiniMax H3** — the native canvas is a 768 short edge, 768×1344 ≈ 1.03 MP
+(`BASE_SHORT_EDGE` / `MAX_PIXELS` in `comfy_extras/nodes_minimax_h3.py`), and 1344×768
+is the node default. 1.33 MP (1536×864) is a mild ~29% stretch and the highest row
+worth running by default. 2.36 MP is 2.3× the trained area and 3.69 MP is 3.6×; motion
+coherence degrades before sharpness improves.
 
 ## Nodes
 
