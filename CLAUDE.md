@@ -18,18 +18,25 @@ Registered through ComfyUI's **V3 schema API**, not the legacy
 
 - ComfyUI checkout: `/home/dreevelle/comfy/ComfyUI`
 - Python venv: `/home/dreevelle/comfy-env/bin/python`
-- `ComfyUI/custom_nodes/ComfyUI-ResolutionTools` is a **symlink to this working
-  tree**, so edits are live on the next server restart:
+- The package is published, and `ComfyUI/custom_nodes/comfyui-resolution-tools`
+  (lowercase, the registry id) is a **ComfyUI-Manager install** that tracks
+  registry releases. This working tree is not wired into ComfyUI.
 
-  ```bash
-  ln -sfn /home/dreevelle/Projects/ComfyUI-ResolutionTools \
-          /home/dreevelle/comfy/ComfyUI/custom_nodes/ComfyUI-ResolutionTools
-  ```
+To test a change before releasing it, symlink this tree in under its CamelCase
+name so it doesn't collide with the Manager install:
 
-  This is the pre-publish testing setup. Once the package is on the registry,
-  swap the symlink for an independent clone of the GitHub remote (the
-  FastImageSequence arrangement) so the installed copy tracks releases rather
-  than the working tree.
+```bash
+ln -sfn /home/dreevelle/Projects/ComfyUI-ResolutionTools \
+        /home/dreevelle/comfy/ComfyUI/custom_nodes/ComfyUI-ResolutionTools
+```
+
+**Remove that symlink before doing anything in ComfyUI-Manager for this
+package.** Manager's remove/replace path does `shutil.rmtree` on the *resolved*
+path, so it deletes the symlink target's contents instead of unlinking — on
+2026-08-09 that wiped this working tree, `.git` included, and it had to be
+restored by re-cloning. Commit and push before any Manager operation, and never
+leave a symlinked dev copy in place while installing or updating the published
+version.
 
 ## Verifying changes
 
