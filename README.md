@@ -195,6 +195,119 @@ is the node default. 1.33 MP (1536×864) is a mild ~29% stretch and the highest 
 worth running by default. 2.36 MP is 2.3× the trained area and 3.69 MP is 3.6×; motion
 coherence degrades before sharpness improves.
 
+## Delivering to a fixed screen size
+
+If your output has to land on a fixed canvas — a 1920×1080 game screen, for instance —
+generate on the exact-ratio lattice and **downscale**. Do not generate at the delivery
+size and crop.
+
+1920×1080 is exactly 16:9, and so is every row of the lattice, so the whole table
+resizes onto it with no crop at all:
+
+| Generate | MP | → 1920×1080 | Crop |
+|---|---|---|---|
+| 1280 × 720 | 0.92 | ×1.5 upscale | none |
+| 1536 × 864 | 1.33 | ×1.25 upscale | none |
+| 1792 × 1008 | 1.81 | ×1.0714 upscale | none |
+| 2048 × 1152 | 2.36 | ×0.9375 downscale | none |
+| 2304 × 1296 | 2.99 | ×0.8333 downscale | none |
+| 2560 × 1440 | 3.69 | ×0.75 downscale | none |
+| 1920 × 1088 | 2.09 | x:1.0 / y:0.9926 | **8 px** |
+
+1920×1088 is the only entry needing a crop, because it is the only one that isn't 16:9
+(1.7647). Generating over-size and downscaling is also **supersampling** — you get free
+anti-aliasing on hair, eyelashes and fabric that a 1:1 render plus a trim never gives
+you. 2048×1152 is the pick for Krea 2; 2560×1440 → ×0.75 is an unusually clean resample
+(4 pixels become 3) if you want more of it.
+
+### Which filter
+
+Measured on a zone plate (frequencies rising toward the edges, so aliasing shows up as
+error) against a properly antialiased reference:
+
+| Filter | RMSE, 2048×1152 → 1920×1080 | RMSE, 2560×1440 → 1920×1080 |
+|---|---|---|
+| **lanczos** | **0.00298** | **0.00325** |
+| bicubic | 0.00577 | 0.00365 |
+| bilinear | 0.00650 | 0.00418 |
+| area | 0.04291 | 0.03082 |
+| nearest-exact | 0.04198 | 0.03787 |
+
+**Use `lanczos`.** Two caveats:
+
+- **`area` is a trap.** The usual advice is "area is the downscale filter," and here it
+  is ~10× worse than bicubic. That advice only holds for large reductions. A box filter
+  at a non-integer factor near 1 averages one input pixel for some outputs and two for
+  others — uneven weighting, visible as blotchiness.
+- **`lanczos` quantises to 8-bit.** `comfy/utils.py` routes it through PIL via
+  `Image.fromarray(np.clip(255. * ..., 0, 255).astype(np.uint8))`. Irrelevant for 8-bit
+  delivery (PNG / WebP / VP9), but if you keep a 16-bit master, save it *before* the
+  scale node. To stay in float through the resize, use `bicubic` — second best, small
+  gap.
+
+### Use `Upscale Image`, not `Upscale Image By`
+
+Pin the delivery size, not the scale factor. `ImageScaleBy` computes
+`round(dim * scale_by)` and then calls the same `common_upscale` as `ImageScale`, so the
+pixels are identical — but its `scale_by` widget has `step: 0.01`, and the rounded
+factors are wrong for most of the table:
+
+| Source | typed at step 0.01 | result |
+|---|---|---|
+| 1792 × 1008 | 1.07 | 1917 × 1079 ✗ |
+| 2048 × 1152 | 0.94 | 1925 × 1083 ✗ |
+| 2304 × 1296 | 0.83 | 1912 × 1076 ✗ |
+| 2816 × 1584 | 0.68 | 1915 × 1077 ✗ |
+
+Feeding the factor from a full-precision float node avoids that, but buys nothing:
+`ImageScale` at `1920 × 1080` is exact by construction, needs no extra node, and is
+correct for *every* lattice row without edits — whereas a hardcoded factor is correct
+for exactly one source resolution and goes silently stale the moment you change the
+megapixel target.
+
+The lattice already did the work upstream by making the source exactly 16:9. `0.9375`
+is just what `1920/2048` happens to equal; it isn't a number you need to carry around.
+
+### Wiring it up
+
+Stills (Krea 2):
+
+```
+Resolution Selector (Real MP)     aspect 16:9 · megapixels 2.36 · alignment 32 · exact_ratio true
+        │ width, height                                                    → 2048 × 1152
+        ▼
+EmptySD3LatentImage → KSampler → VAEDecode
+        ▼
+Upscale Image        lanczos · width 1920 · height 1080 · crop disabled
+        ▼
+Save Image
+```
+
+`EmptySD3LatentImage` is the right latent node for Krea 2 — `[B, 16, H//8, W//8]`,
+matching its 16-channel Wan21 latent format.
+
+Video (MiniMax H3): same front end into the H3 nodes' `width`/`height`. `Upscale Image`
+handles a `[B,H,W,C]` batch frame by frame, but if you are dumping a PNG sequence and
+encoding with ffmpeg anyway, fold the resize into that pass instead — it avoids an
+intermediate 8-bit round trip and ffmpeg's lanczos is full precision:
+
+```bash
+ffmpeg -framerate 24 -i raw_%05d.png \
+  -vf "scale=1920:1080:flags=lanczos,format=yuv420p" \
+  -c:v libvpx-vp9 -crf 28 -b:v 0 -row-mt 1 \
+  out.webm
+```
+
+24 fps matches H3's internal `FPS = 24`.
+
+### One simplification
+
+Set **`alignment = 32` for everything.** 32 is a multiple of 16, so every size it
+produces is legal on Krea 2 *and* MiniMax H3 — one configuration for a whole project
+instead of tracking which model needs which grid. The lattice is coarser, but at 16:9
+the useful rows are all still there (1024×576, 1536×864, 2048×1152, 2560×1440), and
+2048×1152 comes out identical either way.
+
 ## Nodes
 
 ### Resolution Selector (Real MP)
