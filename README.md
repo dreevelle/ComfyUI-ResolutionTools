@@ -98,6 +98,20 @@ ComfyUI's built-in Resolution Selector computes `megapixels * 1024 * 1024`. That
 
 This node uses `megapixels * 1_000_000`. Ask for 2.36 and you get 2.36.
 
+**So convert before you copy a number out of a model's docs.** A megapixel figure in
+someone else's guide is almost always in the built-in node's unit; multiply by 1.049 to
+get the value to type here. ComfyUI's own MiniMax H3 tutorial, for instance, says to set
+Megapixels to `0.98` — that is **1.03 real MP**. With `exact_ratio` on, the lattice
+usually absorbs an error that small; with it off, 4.86% is exactly the margin you miss
+by. At 16:9 and `alignment = 32`, typing 1.03 gives 1344×768 and typing 0.98 gives
+1312×736.
+
+Worth noticing what that setting produces in the first place: 1344×768 is **7:4**
+(1.750), not the 16:9 (1.778) it is offered under. It reaches H3's documented canvas
+only because the two axes rounded apart — see below. The exact-16:9 lattice at
+`alignment = 32` is `512n × 288n`, which steps 1024×576 → 1536×864 with nothing in
+between, so there is no on-ratio ~1 MP frame to be had; pick a row instead.
+
 ### 2. Rounding each axis independently drifts the aspect ratio
 
 That same 1184×2096 has a ratio of 0.5649. True 9:16 is 0.5625. Both axes were
