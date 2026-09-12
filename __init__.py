@@ -55,7 +55,7 @@ from typing_extensions import override
 
 from comfy_api.latest import ComfyExtension, IO
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +157,13 @@ def align_value(value: int, alignment: int, mode: str) -> int:
 # presets are the lattice, rendered readable -- derived at import time, never
 # hand-maintained, so they cannot drift from what the solver produces.
 # ---------------------------------------------------------------------------
-PRESET_MIN_MP = 0.25
+# The floor sits just under 512x288 (0.147 MP), the n=1 lattice point for 16:9
+# at alignment 32 -- the smallest exact 16:9 an H3 graph can ask for. Useful for
+# audio-only H3 runs, where the video canvas is pure overhead.
+PRESET_MIN_MP = 0.14
 PRESET_MAX_MP = 4.3
-PRESET_MIN_ENTRIES = 6   # coarsest grid that still offers this many sizes wins
-PRESET_MAX_ENTRIES = 9   # thin geometrically beyond this, keeping both ends
+PRESET_MIN_ENTRIES = 6    # coarsest grid that still offers this many sizes wins
+PRESET_MAX_ENTRIES = 11   # thin geometrically beyond this, keeping both ends
 
 # 16:9 and 9:16 lead: the common case for video and for delivery to a screen.
 PRESET_RATIO_ORDER = [

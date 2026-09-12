@@ -390,7 +390,7 @@ the useful rows are all still there (1024×576, 1536×864, 2048×1152, 2560×144
 
 ### Resolution Preset
 
-One combo of 79 known-good resolutions. Every entry is exactly on its aspect ratio and
+One combo of 87 known-good resolutions. Every entry is exactly on its aspect ratio and
 on the patch grid, so there is nothing to compute and nothing to look up.
 
 **Inputs** — `preset`, formatted `ratio · width × height · real MP · compatible models`.
@@ -411,6 +411,10 @@ L=16, so every 16 px is legal) would otherwise contribute a hundred near-identic
 entries, and the coarse grid lands them on canonical sizes — 512, 768, 1024, 1536, 2048
 — instead. Coarse-lattice ratios like 16:9 fall through to grid 16 and keep their full
 useful set.
+
+The list spans 0.15 to 4.3 MP. The bottom end is there for runs where the canvas is
+overhead rather than output — an audio-only MiniMax H3 render, say, where `16:9 · 512 ×
+288` is the smallest exact 16:9 the model's 32 px grid admits.
 
 Why a list and not a number: with `exact_ratio` on, the valid outputs *are* a discrete
 lattice. A continuous megapixel input advertises precision that does not exist, and
