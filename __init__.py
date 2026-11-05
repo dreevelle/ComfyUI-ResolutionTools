@@ -161,9 +161,10 @@ def align_value(value: int, alignment: int, mode: str) -> int:
 # at alignment 32 -- the smallest exact 16:9 an H3 graph can ask for. Useful for
 # audio-only H3 runs, where the video canvas is pure overhead.
 PRESET_MIN_MP = 0.14
-PRESET_MAX_MP = 4.3
+PRESET_BASE_MAX_MP = 4.3  # keep the original grids and labels for saved workflows
+PRESET_MAX_MP = 8.0
 PRESET_MIN_ENTRIES = 6    # coarsest grid that still offers this many sizes wins
-PRESET_MAX_ENTRIES = 11   # thin geometrically beyond this, keeping both ends
+PRESET_MAX_ENTRIES = 11   # thin the original range beyond this, keeping both ends
 
 # 16:9 and 9:16 lead: the common case for video and for delivery to a screen.
 PRESET_RATIO_ORDER = [
@@ -185,13 +186,13 @@ def compat_tag(width: int, height: int) -> str:
     return "K2"
 
 
-def _lattice_points(w_ratio, h_ratio, alignment):
+def _lattice_points(w_ratio, h_ratio, alignment, max_mp=PRESET_MAX_MP):
     step = lattice_step(w_ratio, h_ratio, alignment)
     out, n = [], 1
     while True:
         w, h = w_ratio * step * n, h_ratio * step * n
         mp = w * h / 1_000_000
-        if mp > PRESET_MAX_MP:
+        if mp > max_mp:
             return out
         if mp >= PRESET_MIN_MP:
             out.append((w, h, mp))
@@ -202,10 +203,13 @@ def build_presets() -> dict[str, tuple[int, int]]:
     """Readable label -> (width, height), covering every aspect ratio.
 
     Per ratio, take the *coarsest* grid that still yields PRESET_MIN_ENTRIES
-    sizes. Fine-lattice ratios (1:1 has L=16, so 16n x 16n) would otherwise
-    flood the list with a hundred near-identical entries; the coarse grid
-    lands them on canonical sizes instead (512, 768, 1024, ...). Coarse-lattice
+    sizes in the original range through PRESET_BASE_MAX_MP. Fine-lattice
+    ratios (1:1 has L=16, so 16n x 16n) would otherwise flood the list with a
+    hundred near-identical entries; the coarse grid lands them on canonical
+    sizes instead (512, 768, 1024, ...). Coarse-lattice
     ratios like 16:9 fall through to grid 16 and keep their full useful set.
+    Append larger sizes on that same grid through PRESET_MAX_MP, preserving
+    the original labels so saved workflows keep working.
     """
     presets = {}
     for ratio in PRESET_RATIO_ORDER:
@@ -215,7 +219,7 @@ def build_presets() -> dict[str, tuple[int, int]]:
 
         points = []
         for alignment in (256, 128, 64, 32, 16):
-            points = _lattice_points(a, b, alignment)
+            points = _lattice_points(a, b, alignment, PRESET_BASE_MAX_MP)
             if len(points) >= PRESET_MIN_ENTRIES:
                 break
 
@@ -223,6 +227,9 @@ def build_presets() -> dict[str, tuple[int, int]]:
             span = len(points) - 1
             keep = {round(i * span / (PRESET_MAX_ENTRIES - 1)) for i in range(PRESET_MAX_ENTRIES)}
             points = [points[i] for i in sorted(keep)]
+
+        points.extend(point for point in _lattice_points(a, b, alignment)
+                      if point[2] > PRESET_BASE_MAX_MP)
 
         # label with the declared ratio (21:9), not the reduced pair (7:3)
         name = ratio.value.split(" ")[0]
