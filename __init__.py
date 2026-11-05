@@ -5,10 +5,10 @@ Resolution maths for latent-space models, done exactly.
 Three nodes:
 
 ``ResolutionPreset``
-    The everyday one. A single list of known-good resolutions, each exactly on
-    its aspect ratio and on the model's patch grid, tagged with the model
-    families it is legal for. Generated from the lattice at import time, so it
-    cannot drift from what the solver below produces.
+    The everyday one. Exact-ratio resolutions generated from the lattice,
+    plus explicit P-H3 recommended canvases from Pruna's model card. All land
+    on the model's patch grid; P-H3 entries mark approximate aspect ratios.
+    Tags describe grid compatibility with the model families.
 
 ``ResolutionSelectorMP``
     The parametric one, for custom ratios and arbitrary budgets. Aspect ratio +
@@ -32,7 +32,7 @@ so both axes must be multiples of ``vae_downscale * patch_size``:
 
     ==========================================  =========
     Krea 2 / Flux / SD3 / Qwen-Image / Wan       16   (8 x 2)
-    MiniMax H3                                   32   (16 x 2)
+    MiniMax H3 / P-H3 Image                      32   (16 x 2)
     SDXL / SD1.5 (UNet, 3 downsample stages)     64
     ==========================================  =========
 
@@ -55,7 +55,7 @@ from typing_extensions import override
 
 from comfy_api.latest import ComfyExtension, IO
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ ASPECT_RATIOS: dict[AspectRatio, tuple[int, int]] = {
 ALIGNMENT_TOOLTIP = (
     "Pixel grid both axes must land on = VAE spatial downscale x DiT patch size. "
     "16: Krea 2 / Flux / SD3 / Qwen-Image / Wan. "
-    "32: MiniMax H3. "
+    "32: MiniMax H3 / P-H3 Image. "
     "64: SDXL / SD1.5, and universally safe. "
     "Getting this wrong causes a band of artifacts along the bottom/right edge."
 )
@@ -154,8 +154,9 @@ def align_value(value: int, alignment: int, mode: str) -> int:
 #
 # With exact_ratio on, the valid outputs are a discrete lattice, so a
 # continuous megapixel input advertises precision that does not exist. These
-# presets are the lattice, rendered readable -- derived at import time, never
-# hand-maintained, so they cannot drift from what the solver produces.
+# exact-ratio presets are the lattice, rendered readable -- derived at import
+# time, so they cannot drift from what the solver produces. P-H3 recommended
+# sizes are listed explicitly below to match the published model card.
 # ---------------------------------------------------------------------------
 # The floor sits just under 512x288 (0.147 MP), the n=1 lattice point for 16:9
 # at alignment 32 -- the smallest exact 16:9 an H3 graph can ask for. Useful for
@@ -175,6 +176,30 @@ PRESET_RATIO_ORDER = [
     AspectRatio.SOCIAL_H, AspectRatio.SOCIAL_V,
     AspectRatio.ULTRAWIDE_H, AspectRatio.ULTRAWIDE_V,
 ]
+
+
+# Published nominal buckets, not real-MP limits or guaranteed exact ratios.
+# Source: https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions
+PH3_PRESET_SIZES: dict[str, dict[AspectRatio, tuple[int, int]]] = {
+    "8 MP": {
+        AspectRatio.SQUARE: (2912, 2912),
+        AspectRatio.STANDARD_H: (3360, 2496),
+        AspectRatio.STANDARD_V: (2496, 3360),
+        AspectRatio.PHOTO_H: (3552, 2368),
+        AspectRatio.PHOTO_V: (2368, 3552),
+        AspectRatio.WIDESCREEN_H: (3872, 2176),
+        AspectRatio.WIDESCREEN_V: (2176, 3872),
+    },
+    "4 MP edits": {
+        AspectRatio.SQUARE: (2048, 2048),
+        AspectRatio.STANDARD_H: (2368, 1760),
+        AspectRatio.STANDARD_V: (1760, 2368),
+        AspectRatio.PHOTO_H: (2496, 1664),
+        AspectRatio.PHOTO_V: (1664, 2496),
+        AspectRatio.WIDESCREEN_H: (2720, 1536),
+        AspectRatio.WIDESCREEN_V: (1536, 2720),
+    },
+}
 
 
 def compat_tag(width: int, height: int) -> str:
@@ -238,7 +263,26 @@ def build_presets() -> dict[str, tuple[int, int]]:
     return presets
 
 
+def build_ph3_presets() -> dict[str, tuple[int, int]]:
+    """Pruna's recommended canvases, with real area and ratio drift labelled."""
+    presets = {}
+    for bucket, sizes in PH3_PRESET_SIZES.items():
+        for ratio, (width, height) in sizes.items():
+            a, b = ASPECT_RATIOS[ratio]
+            name = ratio.value.split(" ")[0]
+            if width * b != height * a:
+                name += " (approx)"
+            mp = width * height / 1_000_000
+            label = (
+                f"P-H3 {bucket} · {name} · {width} × {height} · "
+                f"{mp:.2f} MP · {compat_tag(width, height)}"
+            )
+            presets[label] = (width, height)
+    return presets
+
+
 PRESETS = build_presets()
+PRESETS.update(build_ph3_presets())
 PRESET_LABELS = list(PRESETS)
 DEFAULT_PRESET = next(k for k, v in PRESETS.items() if v == (2048, 1152))
 
@@ -340,7 +384,7 @@ class ResolutionSelectorMP(IO.ComfyNode):
 
 
 class ResolutionPreset(IO.ComfyNode):
-    """Pick a known-good resolution from a list instead of computing one."""
+    """Pick an exact-ratio or model-recommended grid-aligned resolution."""
 
     @classmethod
     def define_schema(cls):
@@ -349,10 +393,10 @@ class ResolutionPreset(IO.ComfyNode):
             display_name="Resolution Preset",
             category="utilities",
             description=(
-                "Known-good resolutions, picked from a list. Every entry is exactly "
-                "on its aspect ratio and on the model's patch grid. The tag says which "
-                "models it is legal for: K2 = Krea 2 / Flux / SD3 / Qwen-Image / Wan "
-                "(grid 16), K2+H3 adds MiniMax H3 (grid 32), K2+H3+SDXL adds the UNet "
+                "Grid-aligned resolutions: exact-ratio sizes and explicit P-H3 recommended "
+                "canvases. P-H3 entries mark approximate ratios and show real megapixels. "
+                "The tag describes grid compatibility: K2 = Krea 2 / Flux / SD3 / Qwen-Image / Wan "
+                "(grid 16), K2+H3 adds MiniMax H3 / P-H3 Image (grid 32), K2+H3+SDXL adds the UNet "
                 "models (grid 64)."
             ),
             inputs=[
@@ -362,6 +406,8 @@ class ResolutionPreset(IO.ComfyNode):
                     default=DEFAULT_PRESET,
                     tooltip=(
                         "ratio · width × height · real megapixels · compatible models. "
+                        "P-H3 entries include the model's nominal 8 MP or 4 MP edits bucket; "
+                        "(approx) marks a rounded aspect ratio. "
                         "For a ratio or size not listed, use Resolution Selector (Real MP)."
                     ),
                 ),

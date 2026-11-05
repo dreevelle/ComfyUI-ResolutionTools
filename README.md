@@ -77,6 +77,39 @@ generation is the intended design. Do not downscale a reference to your delivery
 `ReferenceLatent` never resizes, so whatever you hand it is what conditions the model,
 and 1080 is not a multiple of 16 anyway.
 
+### P-H3 image generation and editing
+
+In **Resolution Preset**, choose an entry beginning with `P-H3`. The 14 entries
+match [Pruna's recommended canvases](https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions):
+
+| Nominal aspect ratio | P-H3 8 MP | P-H3 4 MP edits |
+|---|---|---|
+| 1:1 | 2912 × 2912 | 2048 × 2048 |
+| 4:3 | 3360 × 2496 | 2368 × 1760 |
+| 3:4 | 2496 × 3360 | 1760 × 2368 |
+| 3:2 | 3552 × 2368 | 2496 × 1664 |
+| 2:3 | 2368 × 3552 | 1664 × 2496 |
+| 16:9 | 3872 × 2176 | 2720 × 1536 |
+| 9:16 | 2176 × 3872 | 1536 × 2720 |
+
+Use the 8 MP entries for generation or editing, and the 4 MP entries for editing.
+Wire `width` and `height` into `p-h3-image Conditioning`.
+
+The bucket names follow Pruna's convention; the MP value beside the dimensions is
+the real area. For example:
+
+```text
+P-H3 8 MP · 16:9 (approx) · 3872 × 2176 · 8.43 MP · K2+H3
+P-H3 4 MP edits · 1:1 · 2048 × 2048 · 4.19 MP · K2+H3+SDXL
+```
+
+All sizes land on grid 32. `(approx)` marks a nominal ratio that the dimensions
+do not hold exactly: the published 4:3 canvas, 3360 × 2496, is actually 35:26.
+The nominal 8 MP sizes contain 8.39–8.48 million pixels, so these explicit model
+presets extend above the generic list's 8 MP ceiling. The MiniMax H3 video sizing
+advice elsewhere in this README applies to the base video model, not P-H3 Image.
+Compatibility tags describe grid alignment, not a model's recommended canvas.
+
 ### When to use the other two nodes
 
 **Resolution Selector (Real MP)** — a ratio or size the preset list doesn't carry: a
@@ -144,7 +177,7 @@ Both axes must be multiples of `vae_downscale × patch_size`:
 | Models | Alignment | |
 |---|---|---|
 | Krea 2, Flux, SD3, Qwen-Image, Wan | **16** | 8 × 2 |
-| MiniMax H3 | **32** | 16 × 2 |
+| MiniMax H3, P-H3 Image | **32** | 16 × 2 |
 | SDXL, SD1.5 (UNet, 3 downsample stages) | **64** | universally safe |
 
 Miss it and `comfy.ldm.common_dit.pad_to_patch_size` pads the latent up to the patch
@@ -390,8 +423,9 @@ the useful rows are all still there (1024×576, 1536×864, 2048×1152, 2560×144
 
 ### Resolution Preset
 
-One combo of 122 known-good resolutions. Every entry is exactly on its aspect ratio and
-on the patch grid, so there is nothing to compute and nothing to look up.
+One combo of 136 presets: 122 generated exact-ratio entries and 14 explicit
+[P-H3 recommended canvases](#p-h3-image-generation-and-editing). Every entry lands
+on the patch grid. P-H3 entries mark approximate ratios with `(approx)`.
 
 **Inputs** — `preset`, formatted `ratio · width × height · real MP · compatible models`.
 The trailing tag comes from the resolution's divisibility, not a hand-kept table:
@@ -399,23 +433,23 @@ The trailing tag comes from the resolution's divisibility, not a hand-kept table
 | Tag | Grid | Models |
 |---|---|---|
 | `K2` | 16 | Krea 2, Flux, SD3, Qwen-Image, Wan |
-| `K2+H3` | 32 | the above, plus MiniMax H3 |
+| `K2+H3` | 32 | the above, plus MiniMax H3 / P-H3 Image |
 | `K2+H3+SDXL` | 64 | the above, plus SDXL / SD1.5 — universally safe |
 
 **Outputs** — `width`, `height`, `megapixels`, `label`.
 
-The list is **generated from the lattice at import time**, never hand-maintained, so it
+The exact-ratio list is **generated from the lattice at import time**, so it
 cannot drift from what `Resolution Selector (Real MP)` produces. Per ratio it uses the
 coarsest grid that still offers at least six sizes up to 4.3 MP: fine-lattice ratios
 like 1:1 (where L=16, so every 16 px is legal) would otherwise contribute a hundred
 near-identical entries, and the coarse grid lands them on canonical sizes — 512, 768,
-1024, 1536, 2048 — instead. Coarse-lattice ratios like 16:9 fall through to grid 16 and keep their full
-useful set. Larger sizes extend the same grid up to 8 MP, preserving all existing
-preset labels for saved workflows.
+1024, 1536, 2048 — instead. Coarse-lattice ratios like 16:9 fall through to grid 16
+and keep their full useful set. Larger sizes extend the same grid up to 8 MP,
+preserving all existing preset labels for saved workflows.
 
-The list spans 0.15 to 8 MP; each ratio stops at its largest grid-aligned size within
-that ceiling. The bottom end is there for runs where the canvas is overhead rather
-than output — an audio-only MiniMax H3 render, say, where `16:9 · 512 ×
+The exact-ratio list spans 0.15 to 8 MP; each ratio stops at its largest grid-aligned
+size within that ceiling. The bottom end is there for runs where the canvas is
+overhead rather than output — an audio-only MiniMax H3 render, say, where `16:9 · 512 ×
 288` is the smallest exact 16:9 the model's 32 px grid admits.
 
 Why a list and not a number: with `exact_ratio` on, the valid outputs *are* a discrete
