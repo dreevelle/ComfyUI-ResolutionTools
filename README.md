@@ -79,7 +79,8 @@ and 1080 is not a multiple of 16 anyway.
 
 ### P-H3 image generation and editing
 
-In **Resolution Preset**, choose an entry beginning with `P-H3`. The 14 entries
+In **Resolution Preset**, choose an entry ending with `P-H3 8 MP` or `P-H3 4 MP edits`.
+The 14 entries
 match [Pruna's recommended canvases](https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions):
 
 | Nominal aspect ratio | P-H3 8 MP | P-H3 4 MP edits |
@@ -99,8 +100,8 @@ The bucket names follow Pruna's convention; the MP value beside the dimensions i
 the real area. For example:
 
 ```text
-P-H3 8 MP · 16:9 (approx) · 3872 × 2176 · 8.43 MP · K2+H3
-P-H3 4 MP edits · 1:1 · 2048 × 2048 · 4.19 MP · K2+H3+SDXL
+16:9 (approx) · 3872 × 2176 · 8.43 MP · K2+H3 · P-H3 8 MP
+1:1 · 2048 × 2048 · 4.19 MP · K2+H3+SDXL · P-H3 4 MP edits
 ```
 
 All sizes land on grid 32. `(approx)` marks a nominal ratio that the dimensions
@@ -428,7 +429,8 @@ One combo of 136 presets: 122 generated exact-ratio entries and 14 explicit
 on the patch grid. P-H3 entries mark approximate ratios with `(approx)`.
 
 **Inputs** — `preset`, formatted `ratio · width × height · real MP · compatible models`.
-The trailing tag comes from the resolution's divisibility, not a hand-kept table:
+P-H3 entries append their nominal bucket after the compatibility tag. The compatibility
+tag comes from the resolution's divisibility, not a hand-kept table:
 
 | Tag | Grid | Models |
 |---|---|---|

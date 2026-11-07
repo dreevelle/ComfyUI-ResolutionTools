@@ -55,7 +55,7 @@ from typing_extensions import override
 
 from comfy_api.latest import ComfyExtension, IO
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +274,8 @@ def build_ph3_presets() -> dict[str, tuple[int, int]]:
                 name += " (approx)"
             mp = width * height / 1_000_000
             label = (
-                f"P-H3 {bucket} · {name} · {width} × {height} · "
-                f"{mp:.2f} MP · {compat_tag(width, height)}"
+                f"{name} · {width} × {height} · {mp:.2f} MP · "
+                f"{compat_tag(width, height)} · P-H3 {bucket}"
             )
             presets[label] = (width, height)
     return presets
@@ -406,7 +406,7 @@ class ResolutionPreset(IO.ComfyNode):
                     default=DEFAULT_PRESET,
                     tooltip=(
                         "ratio · width × height · real megapixels · compatible models. "
-                        "P-H3 entries include the model's nominal 8 MP or 4 MP edits bucket; "
+                        "P-H3 entries end with the model's nominal 8 MP or 4 MP edits bucket; "
                         "(approx) marks a rounded aspect ratio. "
                         "For a ratio or size not listed, use Resolution Selector (Real MP)."
                     ),
