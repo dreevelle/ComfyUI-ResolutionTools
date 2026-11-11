@@ -41,25 +41,31 @@ their resolution.
 
 ### Three concrete pipelines
 
-**Krea 2 stills, delivered to a 1920×1080 screen** — pick `16:9 · 2048 × 1152`, then
-downscale once at the very end:
+**Stills for a 2560×1440 screen** — generate above the delivery size on the exact-16:9
+lattice, then downscale once at the very end. With P-H3 Image, pick its 16:9 8 MP bucket:
 
 ```
-Resolution Preset  16:9 · 2048 × 1152 · 2.36 MP · K2+H3+SDXL
+Resolution Preset  16:9 · 3584 × 2016 · 7.23 MP · K2+H3 · P-H3 8 MP
         │ width, height
         ▼
-EmptySD3LatentImage → KSampler → VAEDecode
+p-h3-image Conditioning → KSampler → VAEDecode
         ▼
-Upscale Image      lanczos · 1920 × 1080 · crop disabled
+Upscale Image      lanczos · 2560 × 1440 · crop disabled
         ▼
 Save Image
 ```
 
-**MiniMax H3 video** — same front end into the H3 nodes. `2048 × 1152` if you want the
-crop-free downscale to 1080p; `1536 × 864` if you want to stay nearer H3's 1.03 MP
-native canvas and accept a ×1.25 upscale. See
-[Delivering to a fixed screen size](#delivering-to-a-fixed-screen-size) for the
-trade-off, which is about 5 dB of preserved detail.
+With Krea 2, 2560×1440 is already past its sanctioned 2K long edge, so there is no
+over-size row to supersample from: either generate `16:9 · 2560 × 1440` natively and
+accept the extrapolation, or generate `2048 × 1152` and upscale ×1.25 with an upscale
+model. See [Picking a row](#picking-a-row).
+
+**MiniMax H3 video** — same front end into the H3 nodes, on `1536 × 864` (nearest H3's
+1.03 MP native canvas, and the longest clips) or `2048 × 1152` (more detail, shorter
+ceiling). Both sit *below* 1440p, so a clip is fitted up ×5/3 or ×1.25 — at display
+time, or with an upscale model; generating H3 at 2560 × 1440 is 3.6× its trained area.
+A P-H3 still makes a clean first frame for either row: see
+[the hand-off table](#why-it-matters-the-hand-off-to-h3-video-and-25601440).
 
 **Krea 2 Edit character reference** — pick a portrait preset and feed it at native
 resolution, with **no** `Upscale Image` on that branch:
@@ -74,42 +80,63 @@ Resolution Preset  9:16 · 1152 × 2048 · 2.36 MP · K2+H3+SDXL
 Reference and generation resolutions are independent — the DiT gives each reference its
 own slot in the positional ids, so a portrait reference conditioning a landscape
 generation is the intended design. Do not downscale a reference to your delivery size:
-`ReferenceLatent` never resizes, so whatever you hand it is what conditions the model,
-and 1080 is not a multiple of 16 anyway.
+`ReferenceLatent` never resizes, so whatever you hand it is what conditions the model.
 
 ### P-H3 image generation and editing
 
-In **Resolution Preset**, choose an entry ending with `P-H3 8 MP` or `P-H3 4 MP edits`.
-The 14 entries
-match [Pruna's recommended canvases](https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions):
+In **Resolution Preset**, choose an entry ending with `P-H3 8 MP` or `P-H3 4 MP edits`
+and wire `width` and `height` into `p-h3-image Conditioning`. Use the 8 MP entries for
+generation or editing, and the 4 MP entries for editing.
 
-| Nominal aspect ratio | P-H3 8 MP | P-H3 4 MP edits |
-|---|---|---|
-| 1:1 | 2912 × 2912 | 2048 × 2048 |
-| 4:3 | 3360 × 2496 | 2368 × 1760 |
-| 3:4 | 2496 × 3360 | 1760 × 2368 |
-| 3:2 | 3552 × 2368 | 2496 × 1664 |
-| 2:3 | 2368 × 3552 | 1664 × 2496 |
-| 16:9 | 3872 × 2176 | 2720 × 1536 |
-| 9:16 | 2176 × 3872 | 1536 × 2720 |
+The buckets come from
+[Pruna's recommended canvases](https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions),
+but several of Pruna's published shapes are not the ratio they're listed under:
+3872 × 2176 is 1.7794, not 16:9, and 3360 × 2496 is 35:26, not 4:3. So each preset is the
+**largest exact-ratio size on P-H3's grid (32) that does not exceed Pruna's area** for
+that bucket:
 
-Use the 8 MP entries for generation or editing, and the 4 MP entries for editing.
-Wire `width` and `height` into `p-h3-image Conditioning`.
+| Ratio | Pruna 8 MP | **P-H3 8 MP** | Pruna 4 MP edits | **P-H3 4 MP edits** |
+|---|---|---|---|---|
+| 1:1 | 2912 × 2912 | **2912 × 2912** · 8.48 MP | 2048 × 2048 | **2048 × 2048** · 4.19 MP |
+| 4:3 | 3360 × 2496 ✗ | **3328 × 2496** · 8.31 MP | 2368 × 1760 ✗ | **2304 × 1728** · 3.98 MP |
+| 3:2 | 3552 × 2368 | **3552 × 2368** · 8.41 MP | 2496 × 1664 | **2496 × 1664** · 4.15 MP |
+| 16:9 | 3872 × 2176 ✗ | **3584 × 2016** · 7.23 MP | 2720 × 1536 ✗ | **2560 × 1440** · 3.69 MP |
 
-The bucket names follow Pruna's convention; the MP value beside the dimensions is
-the real area. For example:
+Portrait entries are the same sizes transposed. ✗ marks a published shape that is off-ratio.
 
-```text
-16:9 (approx) · 3872 × 2176 · 8.43 MP · K2+H3 · P-H3 8 MP
-1:1 · 2048 × 2048 · 4.19 MP · K2+H3+SDXL · P-H3 4 MP edits
-```
+#### Why it matters: the hand-off to H3 video and 2560×1440
 
-All sizes land on grid 32. `(approx)` marks a nominal ratio that the dimensions
-do not hold exactly: the published 4:3 canvas, 3360 × 2496, is actually 35:26.
-The nominal 8 MP sizes contain 8.39–8.48 million pixels, so these explicit model
-presets extend above the generic list's 8 MP ceiling. The MiniMax H3 video sizing
-advice elsewhere in this README applies to the base video model, not P-H3 Image.
-Compatibility tags describe grid alignment, not a model's recommended canvas.
+A P-H3 still is usually not the end of the pipeline. Two things consume it, and both need
+it exactly 16:9:
+
+- **`MiniMax H3 Image to Video`** resizes `first_frame` with crop *disabled* — a straight
+  stretch onto the video canvas. Every H3 video row (1536 × 864, 2048 × 1152, …) is on the
+  exact-16:9 lattice `512n × 288n`, so an off-ratio seed gets squashed to fit.
+- **A fixed 2560 × 1440 target** (e.g. an asset pipeline that rejects anything not exactly
+  16:9) is on that same lattice: 2560 × 1440 is n = 5.
+
+Every 16:9 P-H3 preset is on that lattice too, so the whole chain is uniform scaling, same
+factor on both axes, no crop, no stretch:
+
+| P-H3 still | → 1536 × 864 (H3) | → 2048 × 1152 (H3) | → 2560 × 1440 |
+|---|---|---|---|
+| 2560 × 1440 · `P-H3 4 MP edits` | ×3/5 | ×4/5 | native |
+| 3072 × 1728 · `K2+H3+SDXL` row | **×1/2** | ×2/3 | ×5/6 |
+| 3584 × 2016 · `P-H3 8 MP` | ×3/7 | ×4/7 | ×5/7 |
+| ~~3872 × 2176~~ (Pruna, old preset) | stretched 0.09% | stretched 0.09% | rejected / cropped |
+
+`3584 × 2016` is the default 16:9 pick: the closest exact 16:9 to P-H3's trained 8 MP area
+without going over. `3072 × 1728` (in the regular list, not tagged P-H3) is worth knowing
+about when the still is mostly a seed for the 1536 × 864 video row — it halves exactly.
+`2560 × 1440` is the edit size, and is already the delivery size.
+
+All P-H3 sizes land on grid 32. The MiniMax H3 video sizing advice elsewhere in this
+README applies to the base video model, not P-H3 Image. Compatibility tags describe grid
+alignment, not a model's recommended canvas.
+
+> **Changed in 1.5.0.** Earlier versions listed Pruna's shapes verbatim, with `(approx)`
+> on the off-ratio ones. Saved workflows using a `16:9 (approx)`, `9:16 (approx)`,
+> `4:3 (approx)` or `3:4 (approx)` P-H3 entry need the preset re-selected.
 
 ### When to use the other two nodes
 
@@ -324,76 +351,92 @@ coherence degrades before sharpness improves.
 
 ## Delivering to a fixed screen size
 
-If your output has to land on a fixed canvas — a 1920×1080 game screen, for instance —
-generate on the exact-ratio lattice and **downscale**. Do not generate at the delivery
-size and crop.
+If your output has to land on a fixed canvas — a 2560×1440 game screen, for instance —
+generate on the exact-ratio lattice and resize once, at the end, to the delivery size.
 
-1920×1080 is exactly 16:9, and so is every row of the lattice, so the whole table
-resizes onto it with no crop at all:
+2560×1440 is exactly 16:9 and is itself a lattice row on both grids (n = 10 of
+`256n × 144n` at alignment 16, n = 5 of `512n × 288n` at alignment 32). So every 16:9
+row resizes onto it with **no crop and no stretch**, and — unlike 1920×1080, whose 1080
+is off-grid for every model here — you can also generate at the delivery size directly:
 
-| Generate | MP | → 1920×1080 | Crop |
+| Generate | MP | Grid | → 2560×1440 |
 |---|---|---|---|
-| 1280 × 720 | 0.92 | ×1.5 upscale | none |
-| 1536 × 864 | 1.33 | ×1.25 upscale | none |
-| 1792 × 1008 | 1.81 | ×1.0714 upscale | none |
-| 2048 × 1152 | 2.36 | ×0.9375 downscale | none |
-| 2304 × 1296 | 2.99 | ×0.8333 downscale | none |
-| 2560 × 1440 | 3.69 | ×0.75 downscale | none |
-| 1920 × 1088 | 2.09 | x:1.0 / y:0.9926 | **8 px** |
+| 1536 × 864 | 1.33 | 32 | ×5/3 upscale |
+| 2048 × 1152 | 2.36 | 64 | ×5/4 upscale |
+| **2560 × 1440** | 3.69 | 32 | **native** |
+| 2816 × 1584 | 4.46 | 16 | ×10/11 downscale |
+| 3072 × 1728 | 5.31 | 64 | ×5/6 downscale |
+| 3328 × 1872 | 6.23 | 16 | ×10/13 downscale |
+| **3584 × 2016** | 7.23 | 32 | **×5/7 downscale** — P-H3 8 MP |
+| 3840 × 2160 | 8.29 | 16 | ×2/3 downscale — Selector only, above the preset ceiling |
 
-1920×1088 is the only entry needing a crop, because it is the only one that isn't 16:9
-(1.7647). Generating over-size and downscaling is also **supersampling** — you get free
-anti-aliasing on hair, eyelashes and fabric that a 1:1 render plus a trim never gives
-you. 2048×1152 is the pick for Krea 2; 2560×1440 → ×0.75 is an unusually clean resample
-(4 pixels become 3) if you want more of it.
+Generating over-size and downscaling is **supersampling** — free anti-aliasing on hair,
+eyelashes and fabric that a 1:1 render never gets. 3584 × 2016 is the pick when the
+model can take it (P-H3 Image); 2560 × 1440 native when it can't, rather than upscaling
+something smaller, since an upscale cannot add detail the generation didn't have. The
+rows below 2560 are there for video, where the model's native canvas wins.
+
+Grid matters for which model can produce the row, not for the resize: a grid-16 row like
+2816 × 1584 is fine for Krea 2 but off-grid for H3 / P-H3.
 
 ### Which filter
 
-Measured on a zone plate (frequencies rising toward the edges, so aliasing shows up as
-error) against a properly antialiased reference:
+Measured on a zone plate (a chirp whose frequency rises toward the corners), downscaled
+to 2560×1440 through the same code paths `common_upscale` uses. Two numbers per cell:
+**passband** error, where the detail is below 1440p's Nyquist limit and should survive
+untouched, and **aliasing**, the residue left where the detail is above that limit and
+should average to flat grey:
 
-| Filter | RMSE, 2048×1152 → 1920×1080 | RMSE, 2560×1440 → 1920×1080 |
+| Filter | 3072 × 1728 → 2560×1440 (×5/6) | 3584 × 2016 → 2560×1440 (×5/7) |
 |---|---|---|
-| **lanczos** | **0.00298** | **0.00325** |
-| bicubic | 0.00577 | 0.00365 |
-| bilinear | 0.00650 | 0.00418 |
-| area | 0.04291 | 0.03082 |
-| nearest-exact | 0.04198 | 0.03787 |
+| | passband / aliasing | passband / aliasing |
+| **lanczos** | **0.0044** / 0.0020 | **0.0043** / **0.0429** |
+| bicubic | 0.0101 / 0.0000 | 0.0100 / 0.1872 |
+| bilinear | 0.0429 / 0.0000 | 0.0316 / 0.1423 |
+| area | 0.1154 / 0.0000 | 0.0871 / 0.0438 |
+| nearest-exact | 0.1162 / 0.0000 | 0.0942 / 0.2527 |
 
-**Use `lanczos`.** Two caveats:
+(At ×5/6 the source's own resolution limit sits below the aliasing band, so nothing can
+alias there; the column only separates filters on passband.)
 
-- **`area` is a trap.** The usual advice is "area is the downscale filter," and here it
-  is ~10× worse than bicubic. That advice only holds for large reductions. A box filter
-  at a non-integer factor near 1 averages one input pixel for some outputs and two for
-  others — uneven weighting, visible as blotchiness.
+**Use `lanczos`.** It is the only filter that is best on both counts. Three caveats:
+
+- **`bicubic` and `bilinear` alias at real reductions.** ComfyUI calls
+  `torch.nn.functional.interpolate` without `antialias`, so they don't prefilter. Near
+  ×1 that barely matters; at ×5/7 bicubic leaves over 4× lanczos's aliasing — moiré on
+  fine fabric and hair.
+- **`area` is a trap.** It aliases less than bicubic, but at a non-integer factor its
+  box averages one input pixel for some outputs and two for others — uneven weighting,
+  visible as blotchiness, and the worst passband error here bar nearest.
 - **`lanczos` quantises to 8-bit.** `comfy/utils.py` routes it through PIL via
   `Image.fromarray(np.clip(255. * ..., 0, 255).astype(np.uint8))`. Irrelevant for 8-bit
   delivery (PNG / WebP / VP9), but if you keep a 16-bit master, save it *before* the
-  scale node. To stay in float through the resize, use `bicubic` — second best, small
-  gap.
+  scale node and do the resize outside ComfyUI (ffmpeg or ImageMagick lanczos, both full
+  precision) — at these reductions `bicubic` is not a safe float fallback.
 
 ### Use `Upscale Image`, not `Upscale Image By`
 
 Pin the delivery size, not the scale factor. `ImageScaleBy` computes
 `round(dim * scale_by)` and then calls the same `common_upscale` as `ImageScale`, so the
 pixels are identical — but its `scale_by` widget has `step: 0.01`, and the rounded
-factors are wrong for most of the table:
+factors are wrong for almost the whole table:
 
 | Source | typed at step 0.01 | result |
 |---|---|---|
-| 1792 × 1008 | 1.07 | 1917 × 1079 ✗ |
-| 2048 × 1152 | 0.94 | 1925 × 1083 ✗ |
-| 2304 × 1296 | 0.83 | 1912 × 1076 ✗ |
-| 2816 × 1584 | 0.68 | 1915 × 1077 ✗ |
+| 1536 × 864 | 1.67 | 2565 × 1443 ✗ |
+| 2816 × 1584 | 0.91 | 2563 × 1441 ✗ |
+| 3072 × 1728 | 0.83 | 2550 × 1434 ✗ |
+| 3328 × 1872 | 0.77 | 2563 × 1441 ✗ |
+| 3584 × 2016 | 0.71 | 2545 × 1431 ✗ |
 
-Feeding the factor from a full-precision float node avoids that, but buys nothing:
-`ImageScale` at `1920 × 1080` is exact by construction, needs no extra node, and is
-correct for *every* lattice row without edits — whereas a hardcoded factor is correct
-for exactly one source resolution and goes silently stale the moment you change the
-megapixel target.
+Only 2048 × 1152 at 1.25 lands. Feeding the factor from a full-precision float node
+avoids that, but buys nothing: `ImageScale` at `2560 × 1440` is exact by construction,
+needs no extra node, and is correct for *every* lattice row without edits — whereas a
+hardcoded factor is correct for exactly one source resolution and goes silently stale
+the moment you change the preset.
 
-The lattice already did the work upstream by making the source exactly 16:9. `0.9375`
-is just what `1920/2048` happens to equal; it isn't a number you need to carry around.
+The lattice already did the work upstream by making the source exactly 16:9. `5/7` is
+just what `2560/3584` happens to equal; it isn't a number you need to carry around.
 
 ### Wiring it up
 
@@ -405,7 +448,7 @@ it avoids an intermediate 8-bit round trip and ffmpeg's lanczos is full precisio
 
 ```bash
 ffmpeg -framerate 24 -i raw_%05d.png \
-  -vf "scale=1920:1080:flags=lanczos,format=yuv420p" \
+  -vf "scale=2560:1440:flags=lanczos,format=yuv420p" \
   -c:v libvpx-vp9 -crf 28 -b:v 0 -row-mt 1 \
   out.webm
 ```
@@ -424,9 +467,9 @@ the useful rows are all still there (1024×576, 1536×864, 2048×1152, 2560×144
 
 ### Resolution Preset
 
-One combo of 136 presets: 122 generated exact-ratio entries and 14 explicit
-[P-H3 recommended canvases](#p-h3-image-generation-and-editing). Every entry lands
-on the patch grid. P-H3 entries mark approximate ratios with `(approx)`.
+One combo of 136 presets: 122 generated exact-ratio entries and 14
+[P-H3 Image buckets](#p-h3-image-generation-and-editing). Every entry lands on the
+patch grid and holds its ratio exactly.
 
 **Inputs** — `preset`, formatted `ratio · width × height · real MP · compatible models`.
 P-H3 entries append their nominal bucket after the compatibility tag. The compatibility

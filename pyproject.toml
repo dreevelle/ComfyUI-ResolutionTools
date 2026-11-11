@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-resolution-tools"
-description = "Resolution maths for latent-space models. Real megapixels (10^6, not 1024^2), patch-grid alignment for Krea 2 / MiniMax H3 / P-H3 Image / Flux / SDXL, exact-ratio sizing, and explicit P-H3 recommended image presets."
-version = "1.4.1"
+description = "Resolution maths for latent-space models. Real megapixels (10^6, not 1024^2), patch-grid alignment for Krea 2 / MiniMax H3 / P-H3 Image / Flux / SDXL, exact-ratio sizing, and P-H3 image presets that hand off cleanly to H3 video."
+version = "1.5.0"
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10"

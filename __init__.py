@@ -6,8 +6,9 @@ Three nodes:
 
 ``ResolutionPreset``
     The everyday one. Exact-ratio resolutions generated from the lattice,
-    plus explicit P-H3 recommended canvases from Pruna's model card. All land
-    on the model's patch grid; P-H3 entries mark approximate aspect ratios.
+    plus P-H3 Image buckets from Pruna's model card, snapped to the exact
+    ratio so a P-H3 still hands off to H3 video and 2560x1440 without a
+    stretch or crop. All land on the model's patch grid.
     Tags describe grid compatibility with the model families.
 
 ``ResolutionSelectorMP``
@@ -55,7 +56,7 @@ from typing_extensions import override
 
 from comfy_api.latest import ComfyExtension, IO
 
-__version__ = "1.4.1"
+__version__ = "1.5.0"
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +156,8 @@ def align_value(value: int, alignment: int, mode: str) -> int:
 # With exact_ratio on, the valid outputs are a discrete lattice, so a
 # continuous megapixel input advertises precision that does not exist. These
 # exact-ratio presets are the lattice, rendered readable -- derived at import
-# time, so they cannot drift from what the solver produces. P-H3 recommended
-# sizes are listed explicitly below to match the published model card.
+# time, so they cannot drift from what the solver produces. P-H3 buckets are
+# derived the same way, from Pruna's published canvas areas (below).
 # ---------------------------------------------------------------------------
 # The floor sits just under 512x288 (0.147 MP), the n=1 lattice point for 16:9
 # at alignment 32 -- the smallest exact 16:9 an H3 graph can ask for. Useful for
@@ -178,9 +179,20 @@ PRESET_RATIO_ORDER = [
 ]
 
 
-# Published nominal buckets, not real-MP limits or guaranteed exact ratios.
-# Source: https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions
-PH3_PRESET_SIZES: dict[str, dict[AspectRatio, tuple[int, int]]] = {
+# Pruna's published canvases, used as per-ratio *area budgets* rather than
+# literal sizes. Source:
+# https://huggingface.co/PrunaAI/P-H3-Image-Comfy#recommended-resolutions
+#
+# Several published shapes are off-ratio: 3872x2176 is 1.7794, not 16:9, and
+# 3360x2496 is 35:26, not 4:3. That breaks the hand-off downstream:
+# ``MiniMax H3 Image to Video`` resizes the first frame with crop disabled, so an
+# off-ratio still gets stretched onto the 512n x 288n video lattice, and a
+# delivery pipeline that only accepts exact 16:9 (2560x1440) rejects it. So each
+# bucket is snapped to the largest exact-ratio size on P-H3's grid (32) that
+# does not exceed the published area: 16:9 becomes 3584x2016 (7/2 of 1024x576,
+# i.e. the same lattice as every H3 video row and 2560x1440).
+PH3_ALIGNMENT = 32
+PH3_BUCKET_CANVASES: dict[str, dict[AspectRatio, tuple[int, int]]] = {
     "8 MP": {
         AspectRatio.SQUARE: (2912, 2912),
         AspectRatio.STANDARD_H: (3360, 2496),
@@ -200,6 +212,13 @@ PH3_PRESET_SIZES: dict[str, dict[AspectRatio, tuple[int, int]]] = {
         AspectRatio.WIDESCREEN_V: (1536, 2720),
     },
 }
+
+
+def solve_exact_within(w_ratio: int, h_ratio: int, alignment: int, max_pixels: int) -> tuple[int, int]:
+    """Largest grid-aligned exact-ratio size whose area does not exceed ``max_pixels``."""
+    step = lattice_step(w_ratio, h_ratio, alignment)
+    n = max(1, math.isqrt(max_pixels // (w_ratio * h_ratio * step * step)))
+    return w_ratio * step * n, h_ratio * step * n
 
 
 def compat_tag(width: int, height: int) -> str:
@@ -264,14 +283,13 @@ def build_presets() -> dict[str, tuple[int, int]]:
 
 
 def build_ph3_presets() -> dict[str, tuple[int, int]]:
-    """Pruna's recommended canvases, with real area and ratio drift labelled."""
+    """P-H3 buckets snapped onto the exact-ratio grid-32 lattice."""
     presets = {}
-    for bucket, sizes in PH3_PRESET_SIZES.items():
-        for ratio, (width, height) in sizes.items():
+    for bucket, canvases in PH3_BUCKET_CANVASES.items():
+        for ratio, (canvas_w, canvas_h) in canvases.items():
             a, b = ASPECT_RATIOS[ratio]
+            width, height = solve_exact_within(a, b, PH3_ALIGNMENT, canvas_w * canvas_h)
             name = ratio.value.split(" ")[0]
-            if width * b != height * a:
-                name += " (approx)"
             mp = width * height / 1_000_000
             label = (
                 f"{name} · {width} × {height} · {mp:.2f} MP · "
@@ -384,7 +402,7 @@ class ResolutionSelectorMP(IO.ComfyNode):
 
 
 class ResolutionPreset(IO.ComfyNode):
-    """Pick an exact-ratio or model-recommended grid-aligned resolution."""
+    """Pick an exact-ratio, grid-aligned resolution."""
 
     @classmethod
     def define_schema(cls):
@@ -393,8 +411,8 @@ class ResolutionPreset(IO.ComfyNode):
             display_name="Resolution Preset",
             category="utilities",
             description=(
-                "Grid-aligned resolutions: exact-ratio sizes and explicit P-H3 recommended "
-                "canvases. P-H3 entries mark approximate ratios and show real megapixels. "
+                "Exact-ratio, grid-aligned resolutions, including P-H3 Image buckets "
+                "(Pruna's recommended canvases snapped to the exact ratio on grid 32). "
                 "The tag describes grid compatibility: K2 = Krea 2 / Flux / SD3 / Qwen-Image / Wan "
                 "(grid 16), K2+H3 adds MiniMax H3 / P-H3 Image (grid 32), K2+H3+SDXL adds the UNet "
                 "models (grid 64)."
@@ -406,8 +424,7 @@ class ResolutionPreset(IO.ComfyNode):
                     default=DEFAULT_PRESET,
                     tooltip=(
                         "ratio · width × height · real megapixels · compatible models. "
-                        "P-H3 entries end with the model's nominal 8 MP or 4 MP edits bucket; "
-                        "(approx) marks a rounded aspect ratio. "
+                        "P-H3 entries end with the model's nominal 8 MP or 4 MP edits bucket. "
                         "For a ratio or size not listed, use Resolution Selector (Real MP)."
                     ),
                 ),
